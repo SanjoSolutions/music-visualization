@@ -2,6 +2,8 @@
 
 A browser-based system-audio visualizer that ports the mirrored spectrum and visual language from the Afterhours app into a standalone project. Audio is analyzed locally with the Web Audio API and is never uploaded or recorded.
 
+Audio analysis lives in the reusable [`music-audio-features`](./packages/music-audio-features) workspace package. It accepts a browser `MediaStream` or audio `MediaStreamTrack` and returns spectrum bands plus higher-level music features without handling capture permissions itself.
+
 ## Visualizations
 
 - **1** — a mirrored 24-band display.

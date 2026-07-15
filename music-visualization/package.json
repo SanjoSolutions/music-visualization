@@ -3,10 +3,18 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "npm test --workspace music-audio-features",
+    "pack:check": "npm run pack:check --workspace music-audio-features"
+  },
+  "dependencies": {
+    "music-audio-features": "*"
   },
   "devDependencies": {
     "vite": "^7.0.0"
