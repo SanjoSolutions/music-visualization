@@ -7,9 +7,11 @@ const ui = {
   status: $("#status"),
 };
 
-const canvasContext = ui.canvas.getContext("2d", { alpha: true, desynchronized: true });
+const canvasContext = ui.canvas.getContext("2d", { alpha: false, desynchronized: true });
 const bandCount = 24;
+const analysisFftSize = 512;
 const idleSpectrum = new Float32Array(bandCount).fill(0.015);
+const spectrumBands = new Float32Array(bandCount).fill(0.015);
 const previousSpectrum = new Float32Array(bandCount).fill(0.015);
 const mirroredSpectrum = new Float32Array(bandCount).fill(0.015);
 
@@ -51,12 +53,39 @@ let visualizationIndex = requestedVisualizationIndex >= 0 ? requestedVisualizati
 let bassHistory = [];
 let fluxHistory = [];
 let beatIntervals = [];
+let averageFrameInterval = 0;
+let previousAnimationTimestamp = 0;
+
+const diagnostics = {
+  causal: true,
+  canvasDesynchronized: Boolean(canvasContext.getContextAttributes?.().desynchronized),
+  captureLatencyMilliseconds: null,
+  contextBaseLatencyMilliseconds: null,
+  sampleRate: null,
+  fftSize: analysisFftSize,
+  fftWindowMilliseconds: null,
+  analyserSmoothing: 0,
+};
+
+ui.canvas.dataset.causal = "true";
+ui.canvas.dataset.desynchronized = String(diagnostics.canvasDesynchronized);
+ui.canvas.dataset.fftSize = String(analysisFftSize);
+ui.canvas.dataset.analyserSmoothing = "0";
+
+Object.defineProperty(window, "__visualizerDiagnostics", {
+  value: () => ({ ...diagnostics, averageFrameIntervalMilliseconds: averageFrameInterval || null }),
+});
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 const average = (values, start = 0, end = values.length) => {
   let total = 0;
   for (let index = start; index < end; index += 1) total += values[index];
   return total / Math.max(1, end - start);
+};
+
+const followEnvelope = (current, target) => {
+  const response = target > current ? .72 : .24;
+  return current + (target - current) * response;
 };
 
 function showStatus(message, duration = 1800) {
@@ -84,6 +113,7 @@ function resetFeatureAnalysis() {
   fluxHistory = [];
   beatIntervals = [];
   previousSpectrum.fill(0.015);
+  spectrumBands.fill(0.015);
   mirroredSpectrum.fill(0.015);
 }
 
@@ -122,6 +152,7 @@ async function startCapture() {
       audio: {
         autoGainControl: false,
         echoCancellation: false,
+        latency: { ideal: 0 },
         noiseSuppression: false,
         suppressLocalAudioPlayback: false,
       },
@@ -138,21 +169,36 @@ async function startCapture() {
     }
 
     displayStream = stream;
+    const trackSettings = audioTrack.getSettings();
+    if ("contentHint" in audioTrack) audioTrack.contentHint = "music";
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    audioContext = new AudioContextClass({ latencyHint: "interactive" });
+    const contextOptions = { latencyHint: 0.001 };
+    if (Number.isFinite(trackSettings.sampleRate)) contextOptions.sampleRate = trackSettings.sampleRate;
+    audioContext = new AudioContextClass(contextOptions);
     await audioContext.resume();
 
     sourceNode = audioContext.createMediaStreamSource(new MediaStream([audioTrack]));
     analyser = audioContext.createAnalyser();
-    // A shorter analysis window and lighter smoothing keep the visualization
-    // close to the captured signal instead of trailing it by several frames.
-    analyser.fftSize = 1024;
-    analyser.smoothingTimeConstant = 0.35;
+    // The FFT is the shortest practical window that still resolves a house
+    // kick from the rest of the spectrum. Smoothing here would add latency;
+    // visualization 1 applies its own causal display envelope instead.
+    analyser.fftSize = analysisFftSize;
+    analyser.smoothingTimeConstant = 0;
     analyser.minDecibels = -100;
     analyser.maxDecibels = -20;
     sourceNode.connect(analyser);
 
     frequencyData = new Float32Array(analyser.frequencyBinCount);
+    diagnostics.captureLatencyMilliseconds = Number.isFinite(trackSettings.latency)
+      ? trackSettings.latency * 1000
+      : null;
+    diagnostics.contextBaseLatencyMilliseconds = Number.isFinite(audioContext.baseLatency)
+      ? audioContext.baseLatency * 1000
+      : null;
+    diagnostics.sampleRate = audioContext.sampleRate;
+    diagnostics.fftWindowMilliseconds = analyser.fftSize / audioContext.sampleRate * 1000;
+    ui.canvas.dataset.sampleRate = String(audioContext.sampleRate);
+    ui.canvas.dataset.fftWindowMilliseconds = diagnostics.fftWindowMilliseconds.toFixed(3);
     stopping = false;
     resetFeatureAnalysis();
 
@@ -191,6 +237,12 @@ async function releaseCapture() {
     await audioContext.close().catch(() => {});
   }
   audioContext = null;
+  diagnostics.captureLatencyMilliseconds = null;
+  diagnostics.contextBaseLatencyMilliseconds = null;
+  diagnostics.sampleRate = null;
+  diagnostics.fftWindowMilliseconds = null;
+  delete ui.canvas.dataset.sampleRate;
+  delete ui.canvas.dataset.fftWindowMilliseconds;
 }
 
 async function stopCapture({ notify = true } = {}) {
@@ -212,17 +264,16 @@ function getSpectrumBands() {
   if (!analyser || !frequencyData || !audioContext) return idleSpectrum;
 
   analyser.getFloatFrequencyData(frequencyData);
-  const bands = new Float32Array(bandCount);
   const nyquist = audioContext.sampleRate / 2;
-  const minimumFrequency = 35;
+  const minimumFrequency = Math.max(45, audioContext.sampleRate / analyser.fftSize);
   const maximumFrequency = Math.min(16000, nyquist);
 
-  for (let index = 0; index < bands.length; index += 1) {
-    const lowerRatio = index / bands.length;
-    const upperRatio = (index + 1) / bands.length;
+  for (let index = 0; index < spectrumBands.length; index += 1) {
+    const lowerRatio = index / spectrumBands.length;
+    const upperRatio = (index + 1) / spectrumBands.length;
     const lowFrequency = minimumFrequency * ((maximumFrequency / minimumFrequency) ** lowerRatio);
     const highFrequency = minimumFrequency * ((maximumFrequency / minimumFrequency) ** upperRatio);
-    const lowBin = clamp(Math.floor((lowFrequency / nyquist) * frequencyData.length), 0, frequencyData.length - 1);
+    const lowBin = clamp(Math.floor((lowFrequency / nyquist) * frequencyData.length), 1, frequencyData.length - 1);
     const highBin = clamp(Math.ceil((highFrequency / nyquist) * frequencyData.length), lowBin + 1, frequencyData.length);
 
     let energy = 0;
@@ -232,10 +283,10 @@ function getSpectrumBands() {
     }
 
     const bandAverage = energy / Math.max(1, highBin - lowBin);
-    bands[index] = clamp(bandAverage ** 1.35, 0.015, 1);
+    spectrumBands[index] = clamp(bandAverage ** 1.35, 0.015, 1);
   }
 
-  return bands;
+  return spectrumBands;
 }
 
 function historyStats(history) {
@@ -255,10 +306,10 @@ function updateAudioFeatures(bands, timestamp) {
   const targetTreble = average(bands, 16, 24);
   const targetEnergy = average(bands);
 
-  features.bass += (targetBass - features.bass) * .28;
-  features.mids += (targetMids - features.mids) * .22;
-  features.treble += (targetTreble - features.treble) * .25;
-  features.energy += (targetEnergy - features.energy) * .2;
+  features.bass = followEnvelope(features.bass, targetBass);
+  features.mids = followEnvelope(features.mids, targetMids);
+  features.treble = followEnvelope(features.treble, targetTreble);
+  features.energy = followEnvelope(features.energy, targetEnergy);
 
   let flux = 0;
   let lowFrequencyFlux = 0;
@@ -524,6 +575,14 @@ function setVisualization(nextIndex, announce = true) {
 }
 
 function draw(timestamp = 0) {
+  if (timestamp && previousAnimationTimestamp) {
+    const frameInterval = timestamp - previousAnimationTimestamp;
+    averageFrameInterval = averageFrameInterval
+      ? averageFrameInterval * .92 + frameInterval * .08
+      : frameInterval;
+  }
+  if (timestamp) previousAnimationTimestamp = timestamp;
+
   const canvas = ui.canvas;
   if (!canvasMetrics) {
     const bounds = canvas.getBoundingClientRect();
@@ -544,7 +603,10 @@ function draw(timestamp = 0) {
   }
 
   canvasContext.setTransform(dpr, 0, 0, dpr, 0, 0);
-  canvasContext.clearRect(0, 0, width, height);
+  canvasContext.globalCompositeOperation = "copy";
+  canvasContext.fillStyle = "#070708";
+  canvasContext.fillRect(0, 0, width, height);
+  canvasContext.globalCompositeOperation = "source-over";
 
   const bands = getSpectrumBands();
   updateAudioFeatures(bands, timestamp);
