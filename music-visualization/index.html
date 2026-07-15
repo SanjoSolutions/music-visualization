@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b0b0d">
+  <meta name="description" content="A private, local system-audio visualizer inspired by Afterhours.">
+  <link rel="icon" href="data:,">
+  <title>Music Visualization — System Audio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <main>
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Music Visualization home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        MUSIC VISUALIZATION
+      </a>
+      <div id="liveIndicator" class="live-indicator">
+        <span aria-hidden="true"></span>
+        <b id="liveLabel">AWAITING SIGNAL</b>
+      </div>
+    </header>
+
+    <section class="stage" aria-labelledby="title">
+      <canvas id="visualizer" aria-label="Live system-audio spectrum"></canvas>
+
+      <div class="stage-content">
+        <p class="eyebrow">A LIVE VIEW OF WHAT YOUR COMPUTER HEARS</p>
+        <h1 id="title">System sound,<br><em>made visible.</em></h1>
+        <p class="intro">
+          Share a screen with system audio and watch every kick, voice, and texture move through the Afterhours spectrum. Audio stays in this browser.
+        </p>
+
+        <div class="actions">
+          <button id="startButton" class="start-button" type="button">
+            <span class="play-icon" aria-hidden="true"></span>
+            <span>
+              <b>SHARE SYSTEM AUDIO</b>
+              <small>Choose Entire Screen · enable Share system audio</small>
+            </span>
+          </button>
+          <button id="stopButton" class="stop-button" type="button" hidden>STOP CAPTURE</button>
+        </div>
+
+        <p id="permissionHint" class="permission-hint">
+          Your browser will ask what to share. Video is never displayed or stored.
+        </p>
+      </div>
+
+      <div class="orbit orbit-a" aria-hidden="true"></div>
+      <div class="orbit orbit-b" aria-hidden="true"></div>
+    </section>
+
+    <section id="console" class="console" aria-label="Live capture status">
+      <div class="now-playing">
+        <span class="playing-pulse" aria-hidden="true"><i></i><i></i><i></i></span>
+        <div>
+          <span class="label">NOW LISTENING</span>
+          <strong id="sourceName">System audio</strong>
+        </div>
+      </div>
+
+      <div class="readouts" aria-live="polite">
+        <div><span class="label">LEVEL</span><strong id="level">−∞ <small>dB</small></strong></div>
+        <div><span class="label">FORMAT</span><strong id="format">—</strong></div>
+        <div><span class="label">ELAPSED</span><strong id="elapsed">00:00</strong></div>
+      </div>
+
+      <div class="timeline-wrap">
+        <div class="timeline-copy"><span>LIVE INPUT LEVEL</span><span id="signalState">LISTENING</span></div>
+        <div class="timeline" role="meter" aria-label="Audio input level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <i id="timelineFill"></i>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <span>PROCESSED LOCALLY WITH WEB AUDIO</span>
+      <span>NO UPLOADS · NO RECORDINGS</span>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <noscript>This visualizer needs JavaScript.</noscript>
+</body>
+</html>
