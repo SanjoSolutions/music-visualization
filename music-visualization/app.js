@@ -28,9 +28,11 @@ const features = {
   energy: 0,
   flux: 0,
   beatPulse: 0,
+  quarterNotePulse: 0,
   beatCount: 0,
   bpm: null,
   lastBeatAt: -Infinity,
+  nextQuarterNoteAt: Number.NaN,
   lastFrameAt: 0,
 };
 
@@ -69,9 +71,11 @@ function resetFeatureAnalysis() {
   features.energy = 0;
   features.flux = 0;
   features.beatPulse = 0;
+  features.quarterNotePulse = 0;
   features.beatCount = 0;
   features.bpm = null;
   features.lastBeatAt = -Infinity;
+  features.nextQuarterNoteAt = Number.NaN;
   features.lastFrameAt = 0;
   bassHistory = [];
   fluxHistory = [];
@@ -277,6 +281,42 @@ function updateAudioFeatures(bands, timestamp) {
   }
 
   features.beatPulse = Math.max(0, features.beatPulse - delta / 360);
+  updateQuarterNoteClock(timestamp, delta);
+}
+
+function updateQuarterNoteClock(timestamp, delta) {
+  features.quarterNotePulse = Math.max(0, features.quarterNotePulse - delta / 260);
+  if (!features.bpm) return;
+
+  const quarterNoteDuration = 60000 / features.bpm;
+  if (!Number.isFinite(features.nextQuarterNoteAt)
+      || timestamp - features.nextQuarterNoteAt > quarterNoteDuration * 1.5) {
+    features.nextQuarterNoteAt = timestamp;
+  }
+
+  if (timestamp >= features.nextQuarterNoteAt) {
+    features.quarterNotePulse = 1;
+    do features.nextQuarterNoteAt += quarterNoteDuration;
+    while (features.nextQuarterNoteAt <= timestamp);
+  }
+}
+
+function alignQuarterNoteClock(timestamp) {
+  if (!features.bpm) return;
+
+  if (!Number.isFinite(features.nextQuarterNoteAt)) {
+    features.nextQuarterNoteAt = timestamp;
+    return;
+  }
+
+  const quarterNoteDuration = 60000 / features.bpm;
+  const nearestGridPoint = features.nextQuarterNoteAt
+    + Math.round((timestamp - features.nextQuarterNoteAt) / quarterNoteDuration) * quarterNoteDuration;
+  const phaseError = timestamp - nearestGridPoint;
+
+  if (Math.abs(phaseError) < quarterNoteDuration * .35) {
+    features.nextQuarterNoteAt += phaseError * .22;
+  }
 }
 
 function registerBeat(timestamp) {
@@ -299,6 +339,7 @@ function registerBeat(timestamp) {
       features.bpm = features.bpm
         ? Math.round(features.bpm * .72 + measuredBpm * .28)
         : measuredBpm;
+      alignQuarterNoteClock(timestamp);
     }
   }
 }
@@ -407,7 +448,8 @@ function drawStellarBloom({ context, width, height, bands, timestamp }) {
   const treble = analyser ? features.treble : .05;
   const tempoRate = features.bpm ? features.bpm / 120 : 1;
   const rotation = timestamp * .00011 * tempoRate;
-  const innerRadius = size * (.045 + features.beatPulse * .035);
+  const quarterNoteEnvelope = features.quarterNotePulse ** .55;
+  const innerRadius = size * (.04 + quarterNoteEnvelope * .085);
 
   context.save();
   context.translate(center.x, center.y);
@@ -457,7 +499,7 @@ function drawStellarBloom({ context, width, height, bands, timestamp }) {
   context.globalCompositeOperation = "source-over";
   context.fillStyle = "rgba(5, 5, 8, .92)";
   context.beginPath();
-  context.arc(0, 0, innerRadius * .76, 0, Math.PI * 2);
+  context.arc(0, 0, innerRadius * (.76 + quarterNoteEnvelope * .16), 0, Math.PI * 2);
   context.fill();
   context.restore();
 }
