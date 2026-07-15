@@ -7,10 +7,11 @@ const ui = {
   status: $("#status"),
 };
 
-const canvasContext = ui.canvas.getContext("2d", { alpha: true });
+const canvasContext = ui.canvas.getContext("2d", { alpha: true, desynchronized: true });
 const bandCount = 24;
 const idleSpectrum = new Float32Array(bandCount).fill(0.015);
 const previousSpectrum = new Float32Array(bandCount).fill(0.015);
+const mirroredSpectrum = new Float32Array(bandCount).fill(0.015);
 
 const visualizations = [
   { id: "1", draw: drawMirroredSpectrum },
@@ -28,11 +29,12 @@ const features = {
   energy: 0,
   flux: 0,
   beatPulse: 0,
-  quarterNotePulse: 0,
+  kickPulse: 0,
   beatCount: 0,
   bpm: null,
   lastBeatAt: -Infinity,
-  nextQuarterNoteAt: Number.NaN,
+  lastKickAt: -Infinity,
+  previousKickEnergy: 0,
   lastFrameAt: 0,
 };
 
@@ -71,16 +73,18 @@ function resetFeatureAnalysis() {
   features.energy = 0;
   features.flux = 0;
   features.beatPulse = 0;
-  features.quarterNotePulse = 0;
+  features.kickPulse = 0;
   features.beatCount = 0;
   features.bpm = null;
   features.lastBeatAt = -Infinity;
-  features.nextQuarterNoteAt = Number.NaN;
+  features.lastKickAt = -Infinity;
+  features.previousKickEnergy = 0;
   features.lastFrameAt = 0;
   bassHistory = [];
   fluxHistory = [];
   beatIntervals = [];
   previousSpectrum.fill(0.015);
+  mirroredSpectrum.fill(0.015);
 }
 
 function setWaitingState() {
@@ -140,8 +144,10 @@ async function startCapture() {
 
     sourceNode = audioContext.createMediaStreamSource(new MediaStream([audioTrack]));
     analyser = audioContext.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.72;
+    // A shorter analysis window and lighter smoothing keep the visualization
+    // close to the captured signal instead of trailing it by several frames.
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.35;
     analyser.minDecibels = -100;
     analyser.maxDecibels = -20;
     sourceNode.connect(analyser);
@@ -255,11 +261,15 @@ function updateAudioFeatures(bands, timestamp) {
   features.energy += (targetEnergy - features.energy) * .2;
 
   let flux = 0;
+  let lowFrequencyFlux = 0;
   for (let index = 0; index < bands.length; index += 1) {
-    flux += Math.max(0, bands[index] - previousSpectrum[index]);
+    const increase = Math.max(0, bands[index] - previousSpectrum[index]);
+    flux += increase;
+    if (index < 7) lowFrequencyFlux += increase;
     previousSpectrum[index] = bands[index];
   }
   flux /= bands.length;
+  lowFrequencyFlux /= 7;
   features.flux = flux;
 
   if (analyser) {
@@ -269,11 +279,23 @@ function updateAudioFeatures(bands, timestamp) {
     const spectralOnset = flux > fluxStats.mean + Math.max(.008, fluxStats.deviation * 1.5);
     const enoughSignal = targetEnergy > .035;
     const refractoryPeriodPassed = timestamp - features.lastBeatAt > 270;
+    const kickRise = targetBass - features.previousKickEnergy;
+    const kickThreshold = bassStats.mean + Math.max(.012, bassStats.deviation * 1.05);
+    const kickOnset = targetBass > kickThreshold
+      && kickRise > Math.max(.005, bassStats.deviation * .28)
+      && lowFrequencyFlux > .004;
+    const kickRefractoryPeriodPassed = timestamp - features.lastKickAt > 210;
+
+    if (bassHistory.length > 14 && targetBass > .04 && kickRefractoryPeriodPassed && kickOnset) {
+      features.kickPulse = 1;
+      features.lastKickAt = timestamp;
+    }
 
     if (bassHistory.length > 18 && enoughSignal && refractoryPeriodPassed && bassOnset && spectralOnset) {
       registerBeat(timestamp);
     }
 
+    features.previousKickEnergy = targetBass;
     bassHistory.push(targetBass);
     fluxHistory.push(flux);
     if (bassHistory.length > 72) bassHistory.shift();
@@ -281,42 +303,7 @@ function updateAudioFeatures(bands, timestamp) {
   }
 
   features.beatPulse = Math.max(0, features.beatPulse - delta / 360);
-  updateQuarterNoteClock(timestamp, delta);
-}
-
-function updateQuarterNoteClock(timestamp, delta) {
-  features.quarterNotePulse = Math.max(0, features.quarterNotePulse - delta / 260);
-  if (!features.bpm) return;
-
-  const quarterNoteDuration = 60000 / features.bpm;
-  if (!Number.isFinite(features.nextQuarterNoteAt)
-      || timestamp - features.nextQuarterNoteAt > quarterNoteDuration * 1.5) {
-    features.nextQuarterNoteAt = timestamp;
-  }
-
-  if (timestamp >= features.nextQuarterNoteAt) {
-    features.quarterNotePulse = 1;
-    do features.nextQuarterNoteAt += quarterNoteDuration;
-    while (features.nextQuarterNoteAt <= timestamp);
-  }
-}
-
-function alignQuarterNoteClock(timestamp) {
-  if (!features.bpm) return;
-
-  if (!Number.isFinite(features.nextQuarterNoteAt)) {
-    features.nextQuarterNoteAt = timestamp;
-    return;
-  }
-
-  const quarterNoteDuration = 60000 / features.bpm;
-  const nearestGridPoint = features.nextQuarterNoteAt
-    + Math.round((timestamp - features.nextQuarterNoteAt) / quarterNoteDuration) * quarterNoteDuration;
-  const phaseError = timestamp - nearestGridPoint;
-
-  if (Math.abs(phaseError) < quarterNoteDuration * .35) {
-    features.nextQuarterNoteAt += phaseError * .22;
-  }
+  features.kickPulse = Math.max(0, features.kickPulse - delta / 220);
 }
 
 function registerBeat(timestamp) {
@@ -339,7 +326,6 @@ function registerBeat(timestamp) {
       features.bpm = features.bpm
         ? Math.round(features.bpm * .72 + measuredBpm * .28)
         : measuredBpm;
-      alignQuarterNoteClock(timestamp);
     }
   }
 }
@@ -351,8 +337,30 @@ function visualizationCenter(width, height) {
   };
 }
 
+function stabilizeMirroredSpectrum(bands) {
+  for (let index = 0; index < bands.length; index += 1) {
+    const left = bands[Math.max(0, index - 1)];
+    const center = bands[index];
+    const right = bands[Math.min(bands.length - 1, index + 1)];
+    const spatialAverage = (left + center * 2 + right) / 4;
+    const target = spatialAverage < .06
+      ? .015
+      : clamp((spatialAverage - .035) * 1.08, .015, 1);
+    const difference = target - mirroredSpectrum[index];
+
+    // Ignore tiny fluctuations, react quickly to prominent new elements, and
+    // let established shapes decay slowly enough to remain visually legible.
+    if (Math.abs(difference) < .022) continue;
+    const response = difference > .1 ? .58 : difference > 0 ? .2 : .055;
+    mirroredSpectrum[index] += difference * response;
+  }
+
+  return mirroredSpectrum;
+}
+
 function drawMirroredSpectrum({ context, width, height, bands }) {
-  const count = bands.length;
+  const displayBands = stabilizeMirroredSpectrum(bands);
+  const count = displayBands.length;
   const gap = width < 600 ? 3 : 5;
   const usableWidth = width * .72;
   const barWidth = Math.max(2, (usableWidth - gap * count) / count);
@@ -367,7 +375,7 @@ function drawMirroredSpectrum({ context, width, height, bands }) {
 
   for (let index = 0; index < count; index += 1) {
     const frequencyEmphasis = index < 7 ? 1 + features.bass * .35 : 1;
-    const barHeight = bands[index] * height * .42 * pulseScale * frequencyEmphasis;
+    const barHeight = displayBands[index] * height * .42 * pulseScale * frequencyEmphasis;
     context.fillRect(startX + index * (barWidth + gap), -barHeight, barWidth, barHeight * 2);
   }
 
@@ -448,8 +456,8 @@ function drawStellarBloom({ context, width, height, bands, timestamp }) {
   const treble = analyser ? features.treble : .05;
   const tempoRate = features.bpm ? features.bpm / 120 : 1;
   const rotation = timestamp * .00011 * tempoRate;
-  const quarterNoteEnvelope = features.quarterNotePulse ** .55;
-  const innerRadius = size * (.04 + quarterNoteEnvelope * .085);
+  const kickEnvelope = features.kickPulse ** .55;
+  const innerRadius = size * (.04 + kickEnvelope * .085);
 
   context.save();
   context.translate(center.x, center.y);
@@ -499,7 +507,7 @@ function drawStellarBloom({ context, width, height, bands, timestamp }) {
   context.globalCompositeOperation = "source-over";
   context.fillStyle = "rgba(5, 5, 8, .92)";
   context.beginPath();
-  context.arc(0, 0, innerRadius * (.76 + quarterNoteEnvelope * .16), 0, Math.PI * 2);
+  context.arc(0, 0, innerRadius * (.76 + kickEnvelope * .16), 0, Math.PI * 2);
   context.fill();
   context.restore();
 }
