@@ -14,7 +14,7 @@
     "preelectron:dev": "npm run native:build",
     "electron:dev": "node scripts/electron-dev.js",
     "preelectron:build": "npm run build && npm run native:build",
-    "electron:build": "electron-builder",
+    "electron:build": "electron-builder --publish=never",
     "preview": "vite preview",
     "test": "npm test --workspace music-audio-features && node --test electron/test/audio-analysis-worker.test.js electron/test/window-shortcuts.test.js",
     "pack:check": "npm run pack:check --workspace music-audio-features"
@@ -30,6 +30,10 @@
   "build": {
     "appId": "com.local.musicvisualization",
     "productName": "Music Visualization",
+    "artifactName": "Music-Visualization-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**/*",
       "electron/**/*",

@@ -44,7 +44,18 @@ The capture adapter is selected by platform while the analyzer and all visualiza
 
 In Electron, native mono PCM stays in the backend and is analyzed in a dedicated worker. Only compact spectrum/feature frames cross into the renderer; the browser build continues to use Web Audio with the same causal feature extractor.
 
-Build the current platform's installer with `npm run electron:build`.
+Build the current platform's installer with `npm run electron:build`. Installers are written to `release/`.
+
+## Download desktop builds
+
+GitHub Actions builds the Electron app for Windows x64, Linux x64, and both Apple Silicon and Intel Macs. Every workflow run exposes the installers as build artifacts. Pushing a version tag such as `v1.1.0` also creates a GitHub Release containing all four installers:
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+The builds are currently unsigned. Windows and macOS may therefore show their standard warning when the app is first opened. Code signing can be added later by configuring the relevant certificates as GitHub Actions secrets.
 
 ## Browser notes
 
