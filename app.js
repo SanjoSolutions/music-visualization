@@ -6,7 +6,6 @@ const ui = {
   canvas: $("#visualizer"),
   start: $("#startButton"),
   startLabel: $("#startButton strong"),
-  status: $("#status"),
 };
 
 const canvasContext = ui.canvas.getContext("2d", { alpha: false, desynchronized: true });
@@ -37,7 +36,6 @@ let removeNativeFrameListener = null;
 let removeNativeEndedListener = null;
 let animationFrame = 0;
 let canvasMetrics = null;
-let toastTimer = 0;
 let stopping = false;
 let visualizationIndex = requestedVisualizationIndex >= 0 ? requestedVisualizationIndex : 0;
 let averageFrameInterval = 0;
@@ -64,12 +62,6 @@ Object.defineProperty(window, "__visualizerDiagnostics", {
 });
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
-function showStatus(message, duration = 1800) {
-  ui.status.textContent = message;
-  ui.status.classList.add("show");
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => ui.status.classList.remove("show"), duration);
-}
 
 function resetFeatureAnalysis() {
   audioAnalyzer.reset();
@@ -94,19 +86,11 @@ function setLiveState() {
   document.body.classList.add("started");
 }
 
-function describeCaptureError(error) {
-  if (error?.name === "NotAllowedError") return "SHARING WAS CANCELLED";
-  if (error?.name === "NotFoundError") return "NO CAPTURE SOURCE FOUND";
-  if (error?.name === "NotReadableError") return "THE AUDIO SOURCE IS BUSY";
-  if (!window.isSecureContext) return "OPEN THIS APP ON LOCALHOST OR HTTPS";
-  return "SYSTEM AUDIO COULD NOT START";
-}
-
 async function startCapture() {
   if (captureActive) return;
 
   if (!window.systemAudio && !navigator.mediaDevices?.getDisplayMedia) {
-    showStatus("SCREEN AUDIO CAPTURE IS NOT SUPPORTED HERE", 3600);
+    ui.startLabel.textContent = "AUDIO CAPTURE IS NOT SUPPORTED";
     return;
   }
 
@@ -133,18 +117,11 @@ async function startCapture() {
     resetFeatureAnalysis();
 
     setLiveState();
-    showStatus("SYSTEM AUDIO LIVE");
   } catch (error) {
     console.error(error);
     await releaseCapture();
     setWaitingState();
     ui.startLabel.textContent = "TRY AGAIN";
-
-    if (error?.name === "NoAudioTrackError") {
-      showStatus("ENABLE ‘SHARE SYSTEM AUDIO’ AND TRY AGAIN", 4200);
-    } else {
-      showStatus(describeCaptureError(error), 3200);
-    }
   }
 }
 
@@ -214,19 +191,18 @@ if (window.systemAudio) {
   ui.start.querySelector("span").textContent = "Direct audio capture — no screen sharing";
 }
 
-async function stopCapture({ notify = true } = {}) {
+async function stopCapture() {
   if (stopping) return;
   stopping = true;
   await releaseCapture();
   resetFeatureAnalysis();
   setWaitingState();
   stopping = false;
-  if (notify) showStatus("CAPTURE STOPPED");
 }
 
 function handleCaptureEnded() {
   if (!captureActive || stopping) return;
-  stopCapture({ notify: true });
+  stopCapture();
 }
 
 function visualizationCenter(width, height) {

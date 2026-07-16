@@ -83,38 +83,10 @@ html.capture-pending .audio-gate,
 body.capture-starting .audio-gate,
 body.started .audio-gate { display: none; }
 
-.status {
-  position: fixed;
-  bottom: 22px;
-  left: 50%;
-  z-index: 2;
-  max-width: calc(100vw - 32px);
-  margin: 0;
-  padding: 9px 12px;
-  opacity: 0;
-  pointer-events: none;
-  color: var(--ink);
-  background: rgba(7, 7, 8, .72);
-  border: 1px solid rgba(255, 255, 255, .1);
-  transform: translate(-50%, 8px);
-  transition: opacity .2s ease, transform .2s ease;
-  font: 500 9px/1.2 ui-monospace, "SFMono-Regular", Consolas, monospace;
-  letter-spacing: .12em;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.status.show {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-
 @media (max-width: 420px) {
   .audio-gate { width: calc(100vw - 36px); min-width: 0; }
-  .status { bottom: 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .audio-gate,
-  .status { transition: none; }
+  .audio-gate { transition: none; }
 }
