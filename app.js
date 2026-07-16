@@ -416,7 +416,7 @@ function drawStellarBloom({ context, width, height, bands, timestamp }) {
   context.restore();
 }
 
-function setVisualization(nextIndex, announce = true) {
+function setVisualization(nextIndex) {
   visualizationIndex = (nextIndex + visualizations.length) % visualizations.length;
   const visualization = visualizations[visualizationIndex];
   const url = new URL(window.location.href);
@@ -425,7 +425,6 @@ function setVisualization(nextIndex, announce = true) {
   document.title = `Visualization ${visualization.id}`;
   ui.canvas.dataset.visualization = visualization.id;
   ui.canvas.setAttribute("aria-label", `Live system-audio visualization ${visualization.id}`);
-  if (announce) showStatus(visualization.id);
 }
 
 function draw(timestamp = 0) {
@@ -504,5 +503,5 @@ window.addEventListener("beforeunload", () => {
 });
 
 setWaitingState();
-setVisualization(visualizationIndex, false);
+setVisualization(visualizationIndex);
 animationFrame = requestAnimationFrame(draw);
