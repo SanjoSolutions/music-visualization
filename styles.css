@@ -79,6 +79,8 @@ body { min-width: 280px; }
   font-size: 9px;
 }
 
+html.capture-pending .audio-gate,
+body.capture-starting .audio-gate,
 body.started .audio-gate { display: none; }
 
 .status {

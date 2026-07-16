@@ -31,6 +31,7 @@ npm run electron:dev
 ```
 
 Press **Alt + Enter** to toggle between fullscreen and windowed mode.
+System-audio capture starts automatically when the Electron window opens. If capture cannot start, the on-screen button remains available to retry.
 
 The capture adapter is selected by platform while the analyzer and all visualizations stay shared:
 

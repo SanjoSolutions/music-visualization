@@ -78,12 +78,19 @@ function resetFeatureAnalysis() {
 }
 
 function setWaitingState() {
+  document.documentElement.classList.remove("capture-pending");
   document.body.classList.remove("started");
+  document.body.classList.remove("capture-starting");
   ui.start.disabled = false;
   ui.startLabel.textContent = "START SYSTEM AUDIO";
 }
 
+function setStartingState() {
+  document.body.classList.add("capture-starting");
+}
+
 function setLiveState() {
+  document.body.classList.remove("capture-starting");
   document.body.classList.add("started");
 }
 
@@ -130,7 +137,7 @@ async function startCapture() {
   } catch (error) {
     console.error(error);
     await releaseCapture();
-    ui.start.disabled = false;
+    setWaitingState();
     ui.startLabel.textContent = "TRY AGAIN";
 
     if (error?.name === "NoAudioTrackError") {
@@ -505,3 +512,7 @@ window.addEventListener("beforeunload", () => {
 setWaitingState();
 setVisualization(visualizationIndex);
 animationFrame = requestAnimationFrame(draw);
+if (window.systemAudio) {
+  setStartingState();
+  void startCapture();
+}
