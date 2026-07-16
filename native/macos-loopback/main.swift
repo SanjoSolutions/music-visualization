@@ -80,7 +80,8 @@ final class SystemAudioTap {
         let nonInterleaved = streamDescription.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
         let ioBlock: AudioDeviceIOBlock = { [weak self] _, inputData, _, _, _ in
             guard let self else { return }
-            let buffers = UnsafeMutableAudioBufferListPointer(inputData)
+            // The wrapper has no immutable counterpart; only read through it because Core Audio owns this input list.
+            let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
             guard let first = buffers.first, let firstData = first.mData else { return }
             let frames: Int
             if nonInterleaved {
