@@ -375,6 +375,7 @@ function setVisualization(nextIndex, announce = true) {
   url.searchParams.set("visualization", visualization.id);
   window.history.replaceState(window.history.state, "", url);
   document.title = `Visualization ${visualization.id}`;
+  ui.canvas.dataset.visualization = visualization.id;
   ui.canvas.setAttribute("aria-label", `Live system-audio visualization ${visualization.id}`);
   if (announce) showStatus(visualization.id);
 }
