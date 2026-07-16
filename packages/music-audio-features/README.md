@@ -2,10 +2,23 @@
 
 Low-latency, causal music analysis for browser `MediaStream` audio. The package produces a logarithmic spectrum plus higher-level bass, mids, treble, energy, spectral flux, kick, beat, and BPM data. It does not predict future beats.
 
-## Install
+## Installation
+
+This package is not currently published to npm. To use it in this repository,
+clone the repository and install the workspace dependencies from its root:
 
 ```bash
-npm install music-audio-features
+git clone https://github.com/SanjoSolutions/music-visualization.git
+cd music-visualization
+npm install
+```
+
+The npm workspace links `music-audio-features` automatically. To use the
+package from another local project, clone this repository and install the
+package by its local path instead:
+
+```bash
+npm install /path/to/music-visualization/packages/music-audio-features
 ```
 
 ## Use
