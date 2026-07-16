@@ -7,6 +7,7 @@ Audio analysis lives in the reusable [`music-audio-features`](./packages/music-a
 ## Visualizations
 
 - **1** — a mirrored 24-band display.
+- **1-hsl** — the same mirrored 24-band display with a continuously changing HSL hue that completes a full color cycle every six minutes.
 - **2** — luminous, audio-reactive ribbons orbiting a dark core.
 - **3** — a radial field of colored rays, particles, and rings.
 
