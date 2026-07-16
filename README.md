@@ -30,6 +30,8 @@ npm install
 npm run electron:dev
 ```
 
+Press **Alt + Enter** to toggle between fullscreen and windowed mode.
+
 The capture adapter is selected by platform while the analyzer and all visualizations stay shared:
 
 - **Windows:** native WASAPI loopback, with no permission picker or video capture. The packaged helper is self-contained; development builds require the .NET SDK.

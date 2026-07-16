@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
+import { installWindowShortcuts } from "./window-shortcuts.js";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow = null;
@@ -210,6 +211,7 @@ app.whenReady().then(() => {
       sandbox: true,
     },
   });
+  installWindowShortcuts(mainWindow);
 
   mainWindow.on("closed", () => {
     stopCapture();
