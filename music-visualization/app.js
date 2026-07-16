@@ -11,7 +11,7 @@ const ui = {
 
 const canvasContext = ui.canvas.getContext("2d", { alpha: false, desynchronized: true });
 const bandCount = 24;
-const analysisFftSize = 512;
+const analysisFftSize = 2048;
 const audioAnalyzer = new AudioStreamAnalyzer({ bandCount, fftSize: analysisFftSize });
 const audioFrame = audioAnalyzer.sample(0);
 const sourceFeatures = audioFrame.features;
