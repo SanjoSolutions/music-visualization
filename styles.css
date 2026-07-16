@@ -28,7 +28,8 @@ body { min-width: 280px; }
   background: radial-gradient(circle at center, #0d0d11 0, var(--background) 68%);
 }
 
-#visualizer[data-visualization="1"] {
+#visualizer[data-visualization="1"],
+#visualizer[data-visualization="1-hsl"] {
   inset: 1rem;
   width: calc(100vw - 2rem);
   height: calc(100vh - 2rem);

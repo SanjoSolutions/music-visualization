@@ -21,6 +21,7 @@ const MINIMUM_FEATURE_CHANGE = 0.035;
 
 const visualizations = [
   { id: "1", draw: drawMirroredSpectrum },
+  { id: "1-hsl", draw: drawHueMirroredSpectrum },
   { id: "2", draw: drawPrismaticVortex },
   { id: "3", draw: drawStellarBloom },
 ];
@@ -246,18 +247,23 @@ function stabilizeAudioResponse(bands) {
   return responsiveSpectrum;
 }
 
-function drawMirroredSpectrum({ context, width, height, bands }) {
+function drawMirroredSpectrum({ context, width, height, bands }, hue = null) {
   const count = bands.length;
   const gap = width < 600 ? 3 : 5;
   const usableWidth = width * .72;
   const barWidth = Math.max(2, (usableWidth - gap * count) / count);
   const startX = (width - usableWidth) / 2;
   const pulseScale = 1 + features.beatPulse * .16;
+  const fillAlpha = .42 + features.energy * .25;
 
   context.save();
   context.translate(0, height / 2);
-  context.fillStyle = `rgba(216, 255, 62, ${.42 + features.energy * .25})`;
-  context.shadowColor = "rgba(216, 255, 62, .28)";
+  context.fillStyle = hue === null
+    ? `rgba(216, 255, 62, ${fillAlpha})`
+    : `hsla(${hue}, 100%, 62%, ${fillAlpha})`;
+  context.shadowColor = hue === null
+    ? "rgba(216, 255, 62, .28)"
+    : `hsla(${hue}, 100%, 62%, .28)`;
   context.shadowBlur = features.beatPulse * 14;
 
   for (let index = 0; index < count; index += 1) {
@@ -267,6 +273,11 @@ function drawMirroredSpectrum({ context, width, height, bands }) {
   }
 
   context.restore();
+}
+
+function drawHueMirroredSpectrum(frame) {
+  const hue = (frame.timestamp * .001) % 360;
+  drawMirroredSpectrum(frame, hue);
 }
 
 function drawPrismaticVortex({ context, width, height, bands, timestamp }) {
