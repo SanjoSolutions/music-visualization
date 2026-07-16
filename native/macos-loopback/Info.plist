@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.local.musicvisualization.audio-capture</string>
+  <key>CFBundleName</key>
+  <string>Music Visualization Audio Capture</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Music Visualization uses system audio to drive its local visual effects.</string>
+</dict>
+</plist>

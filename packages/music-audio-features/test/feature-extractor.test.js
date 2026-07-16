@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { AudioFeatureExtractor, AudioStreamAnalyzer } from "../src/index.js";
+import { AudioFeatureExtractor, AudioStreamAnalyzer, PcmStreamAnalyzer } from "../src/index.js";
 
 const quietBands = () => new Float32Array(24).fill(0.015);
 
@@ -17,6 +17,29 @@ test("validates analyzer configuration", () => {
   assert.throws(() => new AudioStreamAnalyzer({ minDecibels: -20, maxDecibels: -100 }), /maxDecibels/);
   assert.throws(() => new AudioStreamAnalyzer({ smoothingTimeConstant: 2 }), /between 0 and 1/);
   assert.throws(() => new AudioFeatureExtractor({ bandCount: 2 }), /at least 3/);
+  assert.throws(() => new PcmStreamAnalyzer({ sampleRate: 0 }), /sampleRate/);
+  assert.throws(() => new PcmStreamAnalyzer({ sampleRate: 48000, hopSize: 0 }), /hopSize/);
+});
+
+test("analyzes streaming PCM into frequency bands without Web Audio", () => {
+  const sampleRate = 48000;
+  const analyzer = new PcmStreamAnalyzer({ sampleRate, fftSize: 2048, hopSize: 512 });
+  const samples = new Float32Array(4096);
+  for (let index = 0; index < samples.length; index += 1) {
+    samples[index] = Math.sin(2 * Math.PI * 110 * index / sampleRate) * 0.2;
+  }
+  let latest = null;
+  const emitted = analyzer.push(samples, (frame) => { latest = frame; });
+
+  assert.equal(emitted, 5);
+  assert.ok(latest);
+  assert.equal(latest.active, true);
+  assert.ok(latest.features.bass > latest.features.treble * 2);
+  const spectralPeak = Math.max(...latest.bands);
+  assert.ok(spectralPeak > 0.8 && spectralPeak < 0.9, `Unexpected Web Audio-normalized peak: ${spectralPeak}`);
+  assert.ok(latest.bands.slice(8).every((band) => band === quietBands()[0]));
+  assert.equal(analyzer.diagnostics.backendAnalysis, true);
+  assert.equal(analyzer.diagnostics.fftWindowMilliseconds, 2048 / 48000 * 1000);
 });
 
 test("reuses its frame and buffers", () => {

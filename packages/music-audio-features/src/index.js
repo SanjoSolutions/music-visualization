@@ -33,6 +33,42 @@ const createFeatures = () => ({
   bpm: null,
 });
 
+const validateSpectrumOptions = ({ fftSize, minimumFrequency, maximumFrequency, minDecibels, maxDecibels }) => {
+  if (!Number.isInteger(fftSize) || fftSize < 32 || fftSize > 32768 || (fftSize & (fftSize - 1)) !== 0) {
+    throw new RangeError("fftSize must be a power of two between 32 and 32768.");
+  }
+  if (!(minimumFrequency > 0) || !(maximumFrequency > minimumFrequency)) {
+    throw new RangeError("maximumFrequency must be greater than minimumFrequency.");
+  }
+  if (!(minDecibels < maxDecibels)) {
+    throw new RangeError("maxDecibels must be greater than minDecibels.");
+  }
+};
+
+const calculateSpectrumBands = (frequencyData, target, sampleRate, options) => {
+  const nyquist = sampleRate / 2;
+  const minimumFrequency = Math.max(options.minimumFrequency, sampleRate / options.fftSize);
+  const maximumFrequency = Math.min(options.maximumFrequency, nyquist);
+
+  for (let index = 0; index < target.length; index += 1) {
+    const lowerRatio = index / target.length;
+    const upperRatio = (index + 1) / target.length;
+    const lowFrequency = minimumFrequency * ((maximumFrequency / minimumFrequency) ** lowerRatio);
+    const highFrequency = minimumFrequency * ((maximumFrequency / minimumFrequency) ** upperRatio);
+    const lowBin = clamp(Math.floor((lowFrequency / nyquist) * frequencyData.length), 1, frequencyData.length - 1);
+    const highBin = clamp(Math.ceil((highFrequency / nyquist) * frequencyData.length), lowBin + 1, frequencyData.length);
+
+    let energy = 0;
+    for (let bin = lowBin; bin < highBin; bin += 1) {
+      const decibels = Number.isFinite(frequencyData[bin]) ? frequencyData[bin] : options.minDecibels;
+      energy += clamp((decibels - options.minDecibels) / (options.maxDecibels - options.minDecibels), 0, 1);
+    }
+
+    const bandAverage = energy / Math.max(1, highBin - lowBin);
+    target[index] = clamp(bandAverage ** 1.35, DEFAULT_BAND_VALUE, 1);
+  }
+};
+
 /**
  * Turns normalized spectrum bands into stable, causal music features.
  * The returned frame and its typed array are reused on every update.
@@ -200,15 +236,7 @@ export class AudioStreamAnalyzer {
     latencyHint = 0.001,
     audioContext = null,
   } = {}) {
-    if (!Number.isInteger(fftSize) || fftSize < 32 || fftSize > 32768 || (fftSize & (fftSize - 1)) !== 0) {
-      throw new RangeError("fftSize must be a power of two between 32 and 32768.");
-    }
-    if (!(minimumFrequency > 0) || !(maximumFrequency > minimumFrequency)) {
-      throw new RangeError("maximumFrequency must be greater than minimumFrequency.");
-    }
-    if (!(minDecibels < maxDecibels)) {
-      throw new RangeError("maxDecibels must be greater than minDecibels.");
-    }
+    validateSpectrumOptions({ fftSize, minimumFrequency, maximumFrequency, minDecibels, maxDecibels });
     if (smoothingTimeConstant < 0 || smoothingTimeConstant > 1) {
       throw new RangeError("smoothingTimeConstant must be between 0 and 1.");
     }
@@ -334,44 +362,144 @@ export class AudioStreamAnalyzer {
   }
 
   #calculateSpectrumBands() {
-    const nyquist = this.context.sampleRate / 2;
-    const minimumFrequency = Math.max(
-      this.options.minimumFrequency,
-      this.context.sampleRate / this.analyserNode.fftSize,
-    );
-    const maximumFrequency = Math.min(this.options.maximumFrequency, nyquist);
+    calculateSpectrumBands(this.frequencyData, this.spectrumBands, this.context.sampleRate, this.options);
+  }
+}
 
-    for (let index = 0; index < this.spectrumBands.length; index += 1) {
-      const lowerRatio = index / this.spectrumBands.length;
-      const upperRatio = (index + 1) / this.spectrumBands.length;
-      const lowFrequency = minimumFrequency * ((maximumFrequency / minimumFrequency) ** lowerRatio);
-      const highFrequency = minimumFrequency * ((maximumFrequency / minimumFrequency) ** upperRatio);
-      const lowBin = clamp(
-        Math.floor((lowFrequency / nyquist) * this.frequencyData.length),
-        1,
-        this.frequencyData.length - 1,
-      );
-      const highBin = clamp(
-        Math.ceil((highFrequency / nyquist) * this.frequencyData.length),
-        lowBin + 1,
-        this.frequencyData.length,
-      );
-
-      let energy = 0;
-      for (let bin = lowBin; bin < highBin; bin += 1) {
-        const decibels = Number.isFinite(this.frequencyData[bin])
-          ? this.frequencyData[bin]
-          : this.options.minDecibels;
-        energy += clamp(
-          (decibels - this.options.minDecibels) / (this.options.maxDecibels - this.options.minDecibels),
-          0,
-          1,
-        );
-      }
-
-      const bandAverage = energy / Math.max(1, highBin - lowBin);
-      this.spectrumBands[index] = clamp(bandAverage ** 1.35, DEFAULT_BAND_VALUE, 1);
+/**
+ * Streaming mono Float32 PCM analyzer for non-browser capture backends.
+ * FFT work is allocation-free after construction; the callback receives the
+ * extractor's reused frame and should copy it if it needs to retain it.
+ */
+export class PcmStreamAnalyzer {
+  constructor({
+    sampleRate,
+    bandCount = 24,
+    fftSize = 2048,
+    hopSize = 512,
+    minDecibels = -100,
+    maxDecibels = -20,
+    minimumFrequency = 45,
+    maximumFrequency = 16000,
+  } = {}) {
+    if (!(sampleRate > 0)) throw new RangeError("sampleRate must be greater than zero.");
+    validateSpectrumOptions({ fftSize, minimumFrequency, maximumFrequency, minDecibels, maxDecibels });
+    if (!Number.isInteger(hopSize) || hopSize < 1 || hopSize > fftSize) {
+      throw new RangeError("hopSize must be an integer between 1 and fftSize.");
     }
+
+    this.options = { sampleRate, bandCount, fftSize, hopSize, minDecibels, maxDecibels, minimumFrequency, maximumFrequency };
+    this.extractor = new AudioFeatureExtractor({ bandCount });
+    this.ring = new Float32Array(fftSize);
+    this.real = new Float64Array(fftSize);
+    this.imaginary = new Float64Array(fftSize);
+    this.frequencyData = new Float32Array(fftSize / 2);
+    this.window = new Float64Array(fftSize);
+    this.bitReversal = new Uint32Array(fftSize);
+    this.twiddleReal = new Float64Array(fftSize / 2);
+    this.twiddleImaginary = new Float64Array(fftSize / 2);
+    this.writeIndex = 0;
+    this.sampleCount = 0;
+    this.samplesUntilAnalysis = fftSize;
+
+    const bits = Math.log2(fftSize);
+    for (let index = 0; index < fftSize; index += 1) {
+      // Match the Web Audio AnalyserNode specification exactly so browser and
+      // native PCM paths produce comparable decibel values.
+      const phase = 2 * Math.PI * index / fftSize;
+      const windowValue = 0.42 - 0.5 * Math.cos(phase) + 0.08 * Math.cos(2 * phase);
+      this.window[index] = windowValue;
+      let reversed = 0;
+      let value = index;
+      for (let bit = 0; bit < bits; bit += 1) {
+        reversed = (reversed << 1) | (value & 1);
+        value >>>= 1;
+      }
+      this.bitReversal[index] = reversed;
+    }
+    for (let index = 0; index < fftSize / 2; index += 1) {
+      const angle = -2 * Math.PI * index / fftSize;
+      this.twiddleReal[index] = Math.cos(angle);
+      this.twiddleImaginary[index] = Math.sin(angle);
+    }
+  }
+
+  get diagnostics() {
+    return {
+      causal: true,
+      connected: true,
+      backendAnalysis: true,
+      captureLatencyMilliseconds: null,
+      contextBaseLatencyMilliseconds: null,
+      sampleRate: this.options.sampleRate,
+      fftSize: this.options.fftSize,
+      hopSize: this.options.hopSize,
+      fftWindowMilliseconds: this.options.fftSize / this.options.sampleRate * 1000,
+      analyserSmoothing: 0,
+      bandCount: this.options.bandCount,
+    };
+  }
+
+  push(samples, onFrame) {
+    if (!samples || typeof samples.length !== "number") throw new TypeError("Expected mono Float32 PCM samples.");
+    if (typeof onFrame !== "function") throw new TypeError("onFrame must be a function.");
+    let emitted = 0;
+    for (let index = 0; index < samples.length; index += 1) {
+      this.ring[this.writeIndex] = Number.isFinite(samples[index]) ? samples[index] : 0;
+      this.writeIndex = (this.writeIndex + 1) % this.options.fftSize;
+      this.sampleCount += 1;
+      this.samplesUntilAnalysis -= 1;
+      if (this.samplesUntilAnalysis > 0) continue;
+      this.samplesUntilAnalysis = this.options.hopSize;
+      this.#analyze();
+      const timestamp = this.sampleCount / this.options.sampleRate * 1000;
+      onFrame(this.extractor.update(this.extractor.bands, timestamp, { active: true }));
+      emitted += 1;
+    }
+    return emitted;
+  }
+
+  reset() {
+    this.ring.fill(0);
+    this.writeIndex = 0;
+    this.sampleCount = 0;
+    this.samplesUntilAnalysis = this.options.fftSize;
+    return this.extractor.reset();
+  }
+
+  #analyze() {
+    const size = this.options.fftSize;
+    for (let index = 0; index < size; index += 1) {
+      const destination = this.bitReversal[index];
+      this.real[destination] = this.ring[(this.writeIndex + index) % size] * this.window[index];
+      this.imaginary[destination] = 0;
+    }
+
+    for (let width = 2; width <= size; width *= 2) {
+      const half = width / 2;
+      const twiddleStep = size / width;
+      for (let start = 0; start < size; start += width) {
+        for (let offset = 0; offset < half; offset += 1) {
+          const even = start + offset;
+          const odd = even + half;
+          const twiddle = offset * twiddleStep;
+          const oddReal = this.real[odd] * this.twiddleReal[twiddle] - this.imaginary[odd] * this.twiddleImaginary[twiddle];
+          const oddImaginary = this.real[odd] * this.twiddleImaginary[twiddle] + this.imaginary[odd] * this.twiddleReal[twiddle];
+          const evenReal = this.real[even];
+          const evenImaginary = this.imaginary[even];
+          this.real[even] = evenReal + oddReal;
+          this.imaginary[even] = evenImaginary + oddImaginary;
+          this.real[odd] = evenReal - oddReal;
+          this.imaginary[odd] = evenImaginary - oddImaginary;
+        }
+      }
+    }
+
+    for (let bin = 0; bin < this.frequencyData.length; bin += 1) {
+      const amplitude = Math.hypot(this.real[bin], this.imaginary[bin]) / size;
+      this.frequencyData[bin] = amplitude > 0 ? 20 * Math.log10(amplitude) : this.options.minDecibels;
+    }
+    calculateSpectrumBands(this.frequencyData, this.extractor.bands, this.options.sampleRate, this.options);
   }
 }
 

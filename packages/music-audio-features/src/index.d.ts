@@ -68,3 +68,25 @@ export class AudioStreamAnalyzer {
   reset(): AudioFeatureFrame;
   disconnect(): Promise<void>;
 }
+
+export interface PcmStreamAnalyzerOptions extends AudioFeatureExtractorOptions {
+  sampleRate: number;
+  fftSize?: number;
+  hopSize?: number;
+  minDecibels?: number;
+  maxDecibels?: number;
+  minimumFrequency?: number;
+  maximumFrequency?: number;
+}
+
+export interface PcmStreamDiagnostics extends AudioStreamDiagnostics {
+  backendAnalysis: true;
+  hopSize: number;
+}
+
+export class PcmStreamAnalyzer {
+  constructor(options: PcmStreamAnalyzerOptions);
+  readonly diagnostics: PcmStreamDiagnostics;
+  push(samples: ArrayLike<number>, onFrame: (frame: AudioFeatureFrame) => void): number;
+  reset(): AudioFeatureFrame;
+}

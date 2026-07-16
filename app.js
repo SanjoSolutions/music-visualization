@@ -30,6 +30,11 @@ const requestedVisualization = new URL(window.location.href).searchParams.get("v
 const requestedVisualizationIndex = visualizations.findIndex(({ id }) => id === requestedVisualization);
 
 let displayStream = null;
+let captureActive = false;
+let nativeCaptureActive = false;
+let nativeDiagnostics = null;
+let removeNativeFrameListener = null;
+let removeNativeEndedListener = null;
 let animationFrame = 0;
 let canvasMetrics = null;
 let toastTimer = 0;
@@ -50,7 +55,10 @@ ui.canvas.dataset.analyserSmoothing = "0";
 Object.defineProperty(window, "__visualizerDiagnostics", {
   value: () => ({
     ...audioAnalyzer.diagnostics,
+    ...nativeDiagnostics,
     ...renderingDiagnostics,
+    spectrumBands: Array.from(audioFrame.bands),
+    audioFrameTimestamp: audioFrame.timestamp,
     averageFrameIntervalMilliseconds: averageFrameInterval || null,
   }),
 });
@@ -88,50 +96,34 @@ function describeCaptureError(error) {
 }
 
 async function startCapture() {
-  if (displayStream) return;
+  if (captureActive) return;
 
-  if (!navigator.mediaDevices?.getDisplayMedia) {
+  if (!window.systemAudio && !navigator.mediaDevices?.getDisplayMedia) {
     showStatus("SCREEN AUDIO CAPTURE IS NOT SUPPORTED HERE", 3600);
     return;
   }
 
   ui.start.disabled = true;
-  ui.startLabel.textContent = "CHOOSE A SOURCE…";
+  ui.startLabel.textContent = window.systemAudio ? "STARTING AUDIO…" : "CHOOSE A SOURCE…";
 
   try {
-    const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { displaySurface: "monitor" },
-      audio: {
-        autoGainControl: false,
-        echoCancellation: false,
-        latency: { ideal: 0 },
-        noiseSuppression: false,
-        suppressLocalAudioPlayback: false,
-      },
-      preferCurrentTab: false,
-      selfBrowserSurface: "exclude",
-      surfaceSwitching: "exclude",
-      systemAudio: "include",
-    });
-
-    const [audioTrack] = stream.getAudioTracks();
-    if (!audioTrack) {
-      stream.getTracks().forEach((track) => track.stop());
-      throw new DOMException("The selected source did not include audio.", "NoAudioTrackError");
+    let diagnostics;
+    if (window.systemAudio) {
+      diagnostics = await startNativeCapture();
+      nativeCaptureActive = true;
+    } else {
+      const stream = await startBrowserCapture();
+      displayStream = stream;
+      await audioAnalyzer.connect(stream);
+      diagnostics = audioAnalyzer.diagnostics;
+      stream.getTracks().forEach((track) => track.addEventListener("ended", handleCaptureEnded, { once: true }));
     }
-
-    displayStream = stream;
-    await audioAnalyzer.connect(audioTrack);
-    const diagnostics = audioAnalyzer.diagnostics;
+    captureActive = true;
     ui.canvas.dataset.sampleRate = String(diagnostics.sampleRate);
     ui.canvas.dataset.fftWindowMilliseconds = diagnostics.fftWindowMilliseconds.toFixed(3);
+    if (diagnostics.hopSize) ui.canvas.dataset.analysisHopSize = String(diagnostics.hopSize);
     stopping = false;
     resetFeatureAnalysis();
-
-    // Display capture requires a video track. It remains alive to preserve the
-    // permission session, but the application never renders or stores it.
-    stream.getVideoTracks().forEach((track) => { track.enabled = false; });
-    stream.getTracks().forEach((track) => track.addEventListener("ended", handleCaptureEnded, { once: true }));
 
     setLiveState();
     showStatus("SYSTEM AUDIO LIVE");
@@ -149,14 +141,70 @@ async function startCapture() {
   }
 }
 
+async function startBrowserCapture() {
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { displaySurface: "monitor" },
+      audio: {
+        autoGainControl: false,
+        echoCancellation: false,
+        latency: { ideal: 0 },
+        noiseSuppression: false,
+        suppressLocalAudioPlayback: false,
+      },
+      preferCurrentTab: false,
+      selfBrowserSurface: "exclude",
+      surfaceSwitching: "exclude",
+      systemAudio: "include",
+    });
+
+  const [audioTrack] = stream.getAudioTracks();
+  if (!audioTrack) {
+    stream.getTracks().forEach((track) => track.stop());
+    throw new DOMException("The selected source did not include audio.", "NoAudioTrackError");
+  }
+
+  // Browsers require this permission track; the Electron path never creates it.
+  stream.getVideoTracks().forEach((track) => { track.enabled = false; });
+  return stream;
+}
+
+async function startNativeCapture() {
+  removeNativeFrameListener = window.systemAudio.onFrame((frame) => {
+    audioFrame.active = frame.active;
+    audioFrame.timestamp = frame.timestamp;
+    audioFrame.bands.set(frame.bands);
+    Object.assign(sourceFeatures, frame.features);
+  });
+  removeNativeEndedListener = window.systemAudio.onEnded((message) => {
+    if (message) console.error(message);
+    handleCaptureEnded();
+  });
+
+  nativeDiagnostics = await window.systemAudio.start();
+  return nativeDiagnostics;
+}
+
 async function releaseCapture() {
   const stream = displayStream;
   displayStream = null;
+  captureActive = false;
+  nativeCaptureActive = false;
+  nativeDiagnostics = null;
 
   if (stream) stream.getTracks().forEach((track) => track.stop());
+  removeNativeFrameListener?.();
+  removeNativeEndedListener?.();
+  removeNativeFrameListener = null;
+  removeNativeEndedListener = null;
+  if (window.systemAudio) await window.systemAudio.stop().catch(() => {});
   await audioAnalyzer.disconnect();
   delete ui.canvas.dataset.sampleRate;
   delete ui.canvas.dataset.fftWindowMilliseconds;
+  delete ui.canvas.dataset.analysisHopSize;
+}
+
+if (window.systemAudio) {
+  ui.start.querySelector("span").textContent = "Direct audio capture — no screen sharing";
 }
 
 async function stopCapture({ notify = true } = {}) {
@@ -170,7 +218,7 @@ async function stopCapture({ notify = true } = {}) {
 }
 
 function handleCaptureEnded() {
-  if (!displayStream || stopping) return;
+  if (!captureActive || stopping) return;
   stopCapture({ notify: true });
 }
 
@@ -414,7 +462,7 @@ function draw(timestamp = 0) {
   canvasContext.fillRect(0, 0, width, height);
   canvasContext.globalCompositeOperation = "source-over";
 
-  const { bands: sourceBands } = audioAnalyzer.sample(timestamp);
+  const { bands: sourceBands } = nativeCaptureActive ? audioFrame : audioAnalyzer.sample(timestamp);
   const bands = stabilizeAudioResponse(sourceBands);
   visualizations[visualizationIndex].draw({
     context: canvasContext,
@@ -445,12 +493,13 @@ new ResizeObserver(() => {
 }).observe(ui.canvas);
 
 document.addEventListener("visibilitychange", () => {
-  if (!audioAnalyzer.connected || document.hidden) return;
+  if (nativeCaptureActive || !audioAnalyzer.connected || document.hidden) return;
   audioAnalyzer.resume().catch(() => {});
 });
 
 window.addEventListener("beforeunload", () => {
   displayStream?.getTracks().forEach((track) => track.stop());
+  if (window.systemAudio) void window.systemAudio.stop();
   void audioAnalyzer.disconnect();
 });
 

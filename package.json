@@ -3,21 +3,66 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "main": "electron/main.js",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "native:build": "node scripts/build-native.js",
+    "preelectron:dev": "npm run native:build",
+    "electron:dev": "node scripts/electron-dev.js",
+    "preelectron:build": "npm run build && npm run native:build",
+    "electron:build": "electron-builder",
     "preview": "vite preview",
-    "test": "npm test --workspace music-audio-features",
+    "test": "npm test --workspace music-audio-features && node --test electron/test/audio-analysis-worker.test.js",
     "pack:check": "npm run pack:check --workspace music-audio-features"
   },
   "dependencies": {
     "music-audio-features": "*"
   },
   "devDependencies": {
+    "electron": "^43.1.1",
+    "electron-builder": "^26.0.12",
     "vite": "^7.0.0"
+  },
+  "build": {
+    "appId": "com.local.musicvisualization",
+    "productName": "Music Visualization",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "!electron/test/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "extraResources": [
+        {
+          "from": "native/windows-loopback/publish",
+          "to": "native/windows-loopback",
+          "filter": ["SystemAudioCapture.exe"]
+        }
+      ]
+    },
+    "mac": {
+      "target": "dmg",
+      "extraResources": [
+        {
+          "from": "native/macos-loopback/publish",
+          "to": "native/macos-loopback",
+          "filter": ["SystemAudioCapture"]
+        }
+      ],
+      "extendInfo": {
+        "NSAudioCaptureUsageDescription": "Music Visualization uses system audio to drive its local visual effects."
+      }
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "AudioVideo"
+    }
   },
   "packageManager": "pnpm@10.28.1+sha512.7d7dbbca9e99447b7c3bf7a73286afaaf6be99251eb9498baefa7d406892f67b879adb3a1d7e687fc4ccc1a388c7175fbaae567a26ab44d1067b54fcb0d6a316"
 }
