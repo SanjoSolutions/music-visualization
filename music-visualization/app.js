@@ -14,8 +14,11 @@ const bandCount = 24;
 const analysisFftSize = 512;
 const audioAnalyzer = new AudioStreamAnalyzer({ bandCount, fftSize: analysisFftSize });
 const audioFrame = audioAnalyzer.sample(0);
-const features = audioFrame.features;
-const mirroredSpectrum = new Float32Array(bandCount).fill(0.015);
+const sourceFeatures = audioFrame.features;
+const features = { ...sourceFeatures };
+const responsiveSpectrum = new Float32Array(bandCount).fill(0.015);
+const MINIMUM_BAND_CHANGE = 0.045;
+const MINIMUM_FEATURE_CHANGE = 0.035;
 
 const visualizations = [
   { id: "1", draw: drawMirroredSpectrum },
@@ -62,7 +65,8 @@ function showStatus(message, duration = 1800) {
 
 function resetFeatureAnalysis() {
   audioAnalyzer.reset();
-  mirroredSpectrum.fill(0.015);
+  responsiveSpectrum.fill(0.015);
+  Object.assign(features, sourceFeatures);
 }
 
 function setWaitingState() {
@@ -177,7 +181,7 @@ function visualizationCenter(width, height) {
   };
 }
 
-function stabilizeMirroredSpectrum(bands) {
+function stabilizeAudioResponse(bands) {
   for (let index = 0; index < bands.length; index += 1) {
     const left = bands[Math.max(0, index - 1)];
     const center = bands[index];
@@ -186,21 +190,33 @@ function stabilizeMirroredSpectrum(bands) {
     const target = spatialAverage < .06
       ? .015
       : clamp((spatialAverage - .035) * 1.08, .015, 1);
-    const difference = target - mirroredSpectrum[index];
+    const difference = target - responsiveSpectrum[index];
 
-    // Ignore tiny fluctuations, react quickly to prominent new elements, and
-    // let established shapes decay slowly enough to remain visually legible.
-    if (Math.abs(difference) < .022) continue;
-    const response = difference > .1 ? .58 : difference > 0 ? .2 : .055;
-    mirroredSpectrum[index] += difference * response;
+    // A shared dead zone keeps every visualization still through minor audio
+    // fluctuations. Larger changes remain quick, while releases are gentler.
+    if (Math.abs(difference) < MINIMUM_BAND_CHANGE) continue;
+    const response = difference > .12 ? .62 : difference > 0 ? .28 : .08;
+    responsiveSpectrum[index] += difference * response;
   }
 
-  return mirroredSpectrum;
+  for (const key of ["bass", "mids", "treble", "energy"]) {
+    const difference = sourceFeatures[key] - features[key];
+    if (Math.abs(difference) < MINIMUM_FEATURE_CHANGE) continue;
+    features[key] += difference * (difference > 0 ? .45 : .12);
+  }
+
+  // Onset pulses are already thresholded events, so preserve their immediacy.
+  features.flux = sourceFeatures.flux;
+  features.beatPulse = sourceFeatures.beatPulse;
+  features.kickPulse = sourceFeatures.kickPulse;
+  features.beatCount = sourceFeatures.beatCount;
+  features.bpm = sourceFeatures.bpm;
+
+  return responsiveSpectrum;
 }
 
 function drawMirroredSpectrum({ context, width, height, bands }) {
-  const displayBands = stabilizeMirroredSpectrum(bands);
-  const count = displayBands.length;
+  const count = bands.length;
   const gap = width < 600 ? 3 : 5;
   const usableWidth = width * .72;
   const barWidth = Math.max(2, (usableWidth - gap * count) / count);
@@ -215,7 +231,7 @@ function drawMirroredSpectrum({ context, width, height, bands }) {
 
   for (let index = 0; index < count; index += 1) {
     const frequencyEmphasis = index < 7 ? 1 + features.bass * .35 : 1;
-    const barHeight = displayBands[index] * height * .42 * pulseScale * frequencyEmphasis;
+    const barHeight = bands[index] * height * .42 * pulseScale * frequencyEmphasis;
     context.fillRect(startX + index * (barWidth + gap), -barHeight, barWidth, barHeight * 2);
   }
 
@@ -397,7 +413,8 @@ function draw(timestamp = 0) {
   canvasContext.fillRect(0, 0, width, height);
   canvasContext.globalCompositeOperation = "source-over";
 
-  const { bands } = audioAnalyzer.sample(timestamp);
+  const { bands: sourceBands } = audioAnalyzer.sample(timestamp);
+  const bands = stabilizeAudioResponse(sourceBands);
   visualizations[visualizationIndex].draw({
     context: canvasContext,
     width,
