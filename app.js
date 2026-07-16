@@ -1,4 +1,4 @@
-import { AudioStreamAnalyzer } from "music-audio-features";
+import { AudioStreamAnalyzer } from "./packages/music-audio-features/src/index.js";
 
 const $ = (selector) => document.querySelector(selector);
 
