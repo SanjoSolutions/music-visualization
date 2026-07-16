@@ -1,5 +1,7 @@
 # Music Visualization
 
+![Visualization 1 showing a mirrored 24-band spectrum](./docs/visualization-1.png)
+
 A cross-platform system-audio visualizer for Electron, with a browser fallback. Audio is analyzed locally and is never uploaded or recorded.
 
 Audio analysis lives in the reusable [`music-audio-features`](./packages/music-audio-features) workspace package. It accepts a browser `MediaStream` or audio `MediaStreamTrack` and returns spectrum bands plus higher-level music features without handling capture permissions itself.
